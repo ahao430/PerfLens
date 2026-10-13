@@ -1,164 +1,418 @@
-我整理成一个偏工程落地的 `plan.md`，重点补充：
+好的。我会整理成一个**完整单文件版 `plan.md`**，定位是：
 
-- pnpm monorepo 架构
-- core + adapter 模式
-- H5 / 微信 / 支付宝差异
-- Skill + MCP
-- AI 分析闭环
-- 小程序 Runtime 特性
-- setData / Bridge / Canvas / 分包 / 插件 / 懒加载分析
-- SDK 与生产隔离
-- 不自动修改生产代码的原则
-- 后续路线
+- 可以直接交给 Claude Code 阅读；
+- 不展开到每个代码接口细节（避免过早约束实现）；
+- 但是把产品边界、架构、模块、技术路线、关键设计决策说明清楚；
+- 后续再让 Claude Code 拆成 `architecture.md / event-schema.md / runtime-sdk.md / roadmap.md` 等。
 
-```md
-# AI Frontend Performance Engineer Plan
+由于完整版本较长，我会分几次输出，避免中间截断。
 
-## 1. 项目定位
+第一部分包含：
 
-AI Frontend Performance Engineer 是一个面向企业前端团队的 AI 性能分析与优化 Agent。
+1. 项目概述
+2. 产品目标
+3. 核心理念
+4. 总体架构
+5. Monorepo设计
+6. 技术选型
+7. Session模型
 
-目标不是替代传统 APM，而是利用 AI 结合：
+下一条继续补：
 
-- 运行时性能数据
-- 自动化测试能力
-- 项目源码分析
-- 前端架构理解
-
-自动定位性能问题，并生成可执行的优化建议。
-
-核心理念：
-
-> 从“发现性能指标异常”升级到“理解为什么慢，并给出架构级优化建议”。
+8. Adapter设计  
+9. H5方案  
+10. 微信方案  
+11. 支付宝Runtime SDK方案  
+12. 小程序性能分析体系  
+13. AI Analyzer  
+14. MCP/Skill  
+15. Dashboard  
+16. 导出  
+17. 开发路线
 
 ---
 
-# 2. 产品目标
+# PerfLens Plan
 
-## 2.1 支持平台
+```md
+# PerfLens
+
+> AI-powered Frontend Performance Engineering Platform
+
+## 1. 项目介绍
+
+PerfLens 是一个 AI 驱动的前端性能工程平台。
+
+目标：
+
+通过 Runtime 数据采集、自动化测试、源码分析和 AI 推理能力，帮助开发者定位 Web 和 MiniApp 应用中的性能问题。
+
+PerfLens 不只是性能监控工具，而是：
+
+> 一个理解前端 Runtime、源码和业务流程的 AI 性能工程师。
+
+
+---
+
+# 2. 产品定位
+
+传统性能工具：
+
+```
+采集指标
+
+↓
+
+展示数据
+
+↓
+
+人工分析
+```
+
+
+PerfLens：
+
+```
+采集 Runtime 数据
+
++
+
+分析项目源码
+
++
+
+理解业务流程
+
++
+
+AI 推理
+
+
+↓
+
+定位性能根因
+
+↓
+
+生成优化建议
+```
+
+
+---
+
+# 3. 支持平台
+
 
 第一阶段：
 
-- H5
-- 微信小程序
+## H5
 
-重点建设：
+基于：
 
-- 支付宝小程序
+- Playwright
+- Chrome DevTools Protocol
+- Browser Performance API
+
+
+---
+
+## 微信小程序
+
+基于：
+
+- 微信自动化 SDK
+- 微信性能 API
+- Runtime Hook
+
+
+---
+
+## 支付宝小程序（重点）
+
+基于：
+
+- Runtime SDK
+- my.performance
+- 真机调试采集
 
 
 原因：
 
-企业业务大量运行在支付宝小程序，而支付宝缺少成熟自动化分析生态，需要提供 Runtime SDK 能力。
+支付宝小程序大量用于企业业务，但是：
+
+- 自动化能力不足
+- 缺少成熟性能分析方案
+- Web 性能工具无法覆盖
 
 
 ---
 
-# 3. 总体架构
+# 4. 核心设计原则
+
+
+## 4.1 AI优先
+
+系统不仅输出：
 
 ```
-                        AI Agent
+首页加载慢
+```
 
-                 Claude Code / IDE Agent
+而应该输出：
 
-                          |
-                          |
-                         MCP
+```
+首页加载慢
 
-                          |
-                          |
+原因：
 
-              Frontend Performance Skill
+onShow阶段同步执行三个接口
 
-                          |
+位置：
 
-        +-----------------+----------------+
+pages/home/index.js
 
-        |                                  |
+影响：
 
- Performance Analyzer              Report Generator
+首次进入页面
 
+建议：
 
-        |
+拆分首屏逻辑
 
-        |
+风险：
 
- Runtime Adapter Layer
-
-
- +-------------+--------------+-------------+
-
- |             |              |
-
- H5        微信小程序      支付宝小程序
-
-
-Playwright   自动化SDK      Runtime SDK
-
-CDP          wx API        my.performance
-
-
-        |
-
-        |
-
- Unified Performance Event Model
-
-
-        |
-
-        |
-
- Source Analyzer
-
-        |
-
-        |
-
- HTML Performance Report
-
+低
 ```
 
 
 ---
 
-# 4. Monorepo设计
+## 4.2 Runtime优先
+
+不同平台拥有不同 Runtime。
+
+不能使用统一 Web 性能模型。
+
+
+例如：
+
+H5：
+
+```
+DOM
+CSS
+Layout
+Paint
+Browser Runtime
+```
+
+
+小程序：
+
+```
+JS Runtime
+
+↓
+
+Bridge
+
+↓
+
+Native Render
+
+```
+
+
+因此：
+
+H5 Adapter 和 MiniApp Adapter 使用不同分析规则。
+
+
+---
+
+## 4.3 不自动修改生产代码
+
+
+尤其小程序。
+
+
+禁止：
+
+- 自动调整分包
+- 自动修改路由
+- 自动迁移页面
+- 自动修改业务逻辑
+
+
+原因：
+
+线上业务风险高。
+
+
+输出：
+
+```
+问题
+
+原因
+
+影响范围
+
+优化方案
+
+风险等级
+
+实施步骤
+```
+
+
+---
+
+# 5. 总体架构
+
+
+```
+                       AI Agent
+
+                Claude Code / IDE Agent
+
+                            |
+
+                           MCP
+
+                            |
+
+                      PerfLens Skill
+
+                            |
+
+                    PerfLens Server
+
+                            |
+
+        +-------------------+-------------------+
+
+        |                                       |
+
+ Runtime Collector                       Automation
+
+
+        |                                       |
+
+ H5 Runtime                            Playwright/CDP
+
+ 微信 Runtime                          微信自动化SDK
+
+ 支付宝 Runtime                       人工真机操作
+
+
+        |
+
+        |
+
+              Performance Session
+
+
+        |
+
+        |
+
+             Dashboard
+
+
+```
+
+
+---
+
+# 6. Monorepo设计
+
 
 采用 pnpm workspace。
+
 
 目录：
 
 ```
-ai-performance/
-
-├── package.json
-├── pnpm-workspace.yaml
-├── turbo.json
+perflens/
 
 
-├── packages/
-
-│
-├── core/
-│
-├── adapter-h5/
-│
-├── adapter-wechat/
-│
-├── adapter-alipay/
-│
-├── analyzers/
-│
-├── skill/
-│
-├── mcp-server/
-│
-├── report/
-│
-└── runtime-sdk/
+packages/
 
 
-├── examples/
+├── core
+
+│
+│   核心数据模型
+│   Event协议
+│   Session模型
+
+
+├── server
+
+│
+│   本地服务
+│   WebSocket
+│   数据管理
+
+
+├── dashboard
+
+│
+│   React Dashboard
+
+
+├── adapter-h5
+
+│
+│   H5采集
+
+
+├── adapter-wechat
+
+│
+│   微信小程序
+
+
+├── adapter-alipay
+
+│
+│   支付宝小程序
+
+
+├── runtime
+
+
+│
+├── runtime-wechat
+│
+└── runtime-alipay
+
+
+├── analyzer
+
+
+│
+├── web-analyzer
+│
+└── miniapp-analyzer
+
+
+├── skill
+
+
+├── mcp-server
+
+
+├── report
+
+
+└── export
+
+
+examples/
+
 
 ├── h5-demo
 
@@ -171,150 +425,413 @@ ai-performance/
 
 ---
 
-# 5. Core设计
+# 7. 技术选型
 
 
-Core 不关心具体平台。
+## Dashboard
+
+推荐：
+
+- React
+- Vite
+- TypeScript
+- Tailwind
+- ECharts
+
 
 负责：
 
-- 数据模型
-- 事件协议
-- Collector接口
-- Analyzer接口
-- Report接口
+- Timeline
+- Charts
+- AI分析展示
+- 导出
 
 
-## Performance Event Model
+---
+
+## Server
+
+MVP：
+
+- Node.js
+- Fastify
+- WebSocket
+- SQLite
 
 
-统一：
+后续：
 
-```typescript
-interface PerformanceEvent {
-
- type:
-  | lifecycle
-  | network
-  | render
-  | resource
-  | error
-  | bridge
-  | component
-  | package
-  | plugin
+- PostgreSQL
+- ClickHouse
 
 
- timestamp:number
+原因：
 
- duration?:number
+性能事件属于：
 
- metadata:any
+- 时间序列
+- 大量Event
+- Session查询
 
+
+---
+
+## MCP
+
+TypeScript MCP SDK。
+
+
+提供：
+
+- Session管理
+- 数据查询
+- AI分析
+- 自动化调用
+
+
+---
+
+## Runtime SDK
+
+
+要求：
+
+- TypeScript
+- 轻量
+- 零业务依赖
+- 可Tree Shaking
+
+
+---
+
+# 8. Performance Session
+
+
+所有性能分析基于 Session。
+
+
+原因：
+
+避免：
+
+Dashboard人工操作
+
+和
+
+Agent自动分析
+
+互相干扰。
+
+
+---
+
+Session模型：
+
+```json
+{
+ id:"session-001",
+
+ platform:"alipay",
+
+ source:"agent",
+
+ project:"demo",
+
+ startTime:123456,
+
+ events:[]
 }
 ```
 
 
-不同平台转换：
+---
+
+# 9. Session来源
+
+
+## 9.1 Agent Session
+
+
+来源：
+
+MCP。
+
+
+流程：
 
 ```
-H5
+用户请求分析
 
-Performance API
+↓
 
-      |
+创建Session
 
-Performance Event
+↓
+
+自动化执行
+
+↓
+
+采集数据
+
+↓
+
+AI分析
+```
 
 
+适合：
 
-微信
-
-wx.getPerformance
-
-      |
-
-Performance Event
+- H5
+- 微信
 
 
+---
 
-支付宝
+## 9.2 Developer Session
 
-my.performance
 
-      |
+来源：
 
-Performance Event
+Dashboard。
+
+
+流程：
+
+```
+启动录制
+
+↓
+
+开发者操作
+
+↓
+
+Runtime采集
+
+↓
+
+AI分析
+```
+
+
+适合：
+
+支付宝真机。
+
+
+---
+
+## 9.3 Runtime Session
+
+
+来源：
+
+SDK连接。
+
+
+例如：
+
+```
+小程序启动
+
+↓
+
+Runtime SDK
+
+↓
+
+WebSocket
+
+↓
+
+PerfLens Server
+```
+
+
+---
+
+# 10. Event模型
+
+
+所有平台统一：
+
+```typescript
+
+interface PerformanceEvent {
+
+
+ id:string
+
+
+ sessionId:string
+
+
+ platform:string
+
+
+ type:string
+
+
+ timestamp:number
+
+
+ duration?:number
+
+
+ metadata:any
+
+
+}
+
+```
+
+
+事件类型：
+
+
+```
+lifecycle
+
+network
+
+resource
+
+render
+
+bridge
+
+setData
+
+component
+
+canvas
+
+package
+
+plugin
+
+error
 
 ```
 
 
 ---
 
-# 6. Adapter设计
-
-不同平台能力不同。
-
-不强行统一。
+# 11. 数据流
 
 
-定义：
+```
+Runtime
+
+↓
+
+Event
+
+↓
+
+Server
+
+↓
+
+Session Storage
+
+↓
+
+Analyzer
+
+↓
+
+Dashboard
+
+
+```
+
+
+---
+
+# 12. AI分析输入
+
+
+AI分析使用：
+
+```
+Performance Events
+
++
+
+项目源码
+
++
+
+项目结构
+
++
+
+配置文件
+
++
+
+性能规则库
+
+```
+
+
+输出：
+
+```
+问题
+
+根因
+
+源码位置
+
+优化建议
+
+风险等级
+
+```
+
+# 13. Adapter设计
+
+
+Adapter负责平台差异。
+
+
+统一接口：
+
+```
+Adapter
+
+├── Collector
+
+├── Capability
+
+├── Analyzer Rule
+
+└── Export Data
+
+```
+
+
+Capability：
 
 ```typescript
-interface AdapterCapability {
+
+interface Capability {
 
  lifecycle:boolean
 
  network:boolean
 
+ automation:boolean
+
+ runtime:boolean
+
  screenshot:boolean
 
  recording:boolean
 
- sourceMap:boolean
-
- automation:boolean
-
-}
-
-```
-
-
-例如：
-
-## H5
-
-```
-{
- lifecycle:true,
- network:true,
- screenshot:true,
- recording:true,
- automation:true
-}
-
-```
-
-
-## 微信
-
-```
-{
- lifecycle:true,
- network:true,
- automation:true
-}
-
-```
-
-
-## 支付宝
-
-```
-{
- lifecycle:true,
- performance:true,
- runtime:true
 }
 
 ```
@@ -322,58 +839,88 @@ interface AdapterCapability {
 
 ---
 
-# 7. H5 Adapter
+# 14. H5 Adapter
 
 
 ## 技术方案
 
-Playwright + CDP。
+
+采用：
+
+- Playwright
+- Chrome DevTools Protocol
 
 
 安装：
 
 ```
-pnpm add playwright
+playwright
 ```
 
 
-能力：
+---
 
-## 页面自动化
+## 自动化能力
+
+
+支持：
 
 - 打开页面
-- 模拟用户操作
-- 页面流程执行
+- 用户流程模拟
+- 页面交互
+- 性能测试
 
+
+例如：
+
+```
+打开首页
+
+点击商品
+
+进入详情
+
+提交订单
+
+```
+
+
+---
 
 ## Performance API
 
+
 采集：
 
-- Navigation Timing
-- Resource Timing
-- Web Vitals
+### Navigation Timing
+
+- DNS
+- TCP
+- TTFB
+- DOM Ready
+- Load
 
 
-指标：
+### Resource Timing
 
-- FCP
+- JS
+- CSS
+- Image
+- API
+
+
+### Web Vitals
+
 - LCP
 - CLS
 - INP
-- TTFB
+- FCP
 
 
-## 网络分析
+---
 
-采集：
+## Runtime分析
 
-- 请求耗时
-- 资源大小
-- API错误
-
-
-## Runtime
 
 采集：
 
@@ -383,150 +930,533 @@ pnpm add playwright
 - Memory
 
 
-## 后续
+---
 
-支持：
+## 扩展能力
+
+
+后续支持：
 
 - rrweb录屏
 - 用户行为回放
+- DOM分析
 
 
 ---
 
-# 8. 微信小程序 Adapter
+# 15. 微信小程序 Adapter
 
 
-利用官方能力：
+微信小程序能力较完整。
+
+
+利用：
 
 - 微信自动化 SDK
 - 微信性能 API
 
 
-## 自动化
+---
+
+# 15.1 自动化
+
 
 支持：
 
-- 启动开发者工具
-- 编译项目
-- 页面操作
-- 流程执行
+- 启动小程序
+- 页面跳转
+- 点击操作
+- 流程复现
 
 
-## 性能采集
+适合：
+
+Agent模式。
 
 
-### App生命周期
+例如：
 
-采集：
+```
+打开首页
 
-- App Launch
-- App Show
+↓
 
+点击商品
 
-### Page生命周期
+↓
 
-采集：
+进入详情页
 
-- onLoad
-- onShow
-- onReady
-- onHide
-- onUnload
+↓
 
+采集性能
 
-### 页面跳转
-
-分析：
-
-- navigateTo
-- redirectTo
-- switchTab
+```
 
 
-### 性能API
+---
 
-利用：
+# 15.2 生命周期采集
+
+
+App：
+
+```
+onLaunch
+
+onShow
+
+onHide
+```
+
+
+Page：
+
+```
+onLoad
+
+onShow
+
+onReady
+
+onHide
+
+onUnload
+```
+
+
+Component：
+
+```
+created
+
+attached
+
+ready
+
+detached
+```
+
+
+---
+
+# 15.3 性能API
+
+
+使用：
 
 - wx.getPerformance
 - wx.reportPerformance
 
 
----
+采集：
 
-# 9. 支付宝小程序 Adapter（重点）
-
-
-## 背景
-
-支付宝小程序：
-
-- 缺少微信类似自动化能力
-- my.performance只能提供底层指标
-- 需要运行时采集能力
-
-
-因此设计：
-
-支付宝 Runtime SDK。
+- 启动耗时
+- 页面耗时
+- 渲染耗时
 
 
 ---
 
-# 10. Runtime SDK设计
+# 16. 支付宝小程序 Adapter
 
 
-目标：
-
-不是长期埋点 SDK。
-
-而是：
-
-> 调试分析和灰度采集 SDK。
+## 定位
 
 
-初始化：
+支付宝是 PerfLens 的核心竞争力。
+
+
+原因：
+
+- 缺少自动化能力
+- 企业应用大量使用
+- Runtime与Web差异大
+
+
+方案：
+
+```
+Runtime SDK
+
++
+
+真机操作
+
++
+
+AI源码分析
+
+```
+
+
+---
+
+# 17. 小程序 Runtime SDK
+
+
+SDK目标：
+
+提供开发调试阶段的 Runtime Instrumentation。
+
+
+不是传统线上 APM。
+
+
+---
+
+# 17.1 初始化
+
+
+例如：
 
 ```javascript
-AIPerf.init({
+
+import '@perflens/alipay/runtime'
+
+
+PerfLens.init({
+
+ server:"ws://localhost:3000",
+
  debug:true
+
 })
 
 ```
 
 
-自动采集：
+---
 
-## App
-
-- onLaunch
-- onShow
+# 17.2 自动采集
 
 
-## Page
-
-- onLoad
-- onShow
-- onReady
-- onHide
+无需业务修改。
 
 
-## Performance
+包括：
 
-封装：
 
-my.performance
+## App生命周期
+
+```
+onLaunch
+
+onShow
+
+```
+
+
+---
+
+## Page生命周期
+
+```
+onLoad
+
+onShow
+
+onReady
+
+onHide
+
+onUnload
+
+```
+
+
+---
+
+## Component生命周期
+
+
+```
+created
+
+attached
+
+ready
+
+```
+
+
+---
+
+## 网络
+
+
+包装：
+
+```
+my.request
+
+```
 
 
 采集：
 
-- 页面耗时
-- 启动耗时
-- 渲染耗时
+- URL
+- duration
+- status
+- size
 
 
-## Session
+---
 
-记录：
+## setData
+
+
+包装：
+
+```
+this.setData()
+
+```
+
+
+采集：
+
+- 调用次数
+- 数据大小
+- 更新字段
+- 调用频率
+
+
+---
+
+# 18. Hook机制
+
+
+SDK采用：
+
+Proxy Wrapper。
+
+
+不是覆盖业务代码。
+
+
+例如：
+
+业务：
+
+```javascript
+
+Page({
+
+ onLoad(){
+
+ }
+
+})
+
+```
+
+
+SDK：
+
+```
+Page
+
+↓
+
+Wrapper
+
+↓
+
+Original Page
+
+```
+
+
+执行：
+
+```
+PerfLens记录
+
+↓
+
+业务生命周期
+
+↓
+
+PerfLens结束记录
+
+```
+
+
+---
+
+# 19. 手动业务埋点
+
+
+自动采集无法理解业务。
+
+
+提供：
+
+```javascript
+
+PerfLens.mark(
+ "product_ready"
+)
+
+```
+
+
+适用于：
+
+
+- 首屏完成
+- 商品可购买
+- 页面可交互
+- 关键流程完成
+
+
+---
+
+# 20. 小程序专项分析体系
+
+
+## 20.1 setData分析
+
+
+小程序核心问题。
+
+
+模型：
+
+```
+JS Runtime
+
+↓
+
+setData
+
+↓
+
+Bridge
+
+↓
+
+Native Render
+
+```
+
+
+---
+
+分析：
+
+### 大数据量
+
+
+例如：
+
+```
+setData 500KB
+```
+
+
+建议：
+
+- 减少字段
+- 拆分数据
+
+
+---
+
+### 高频更新
+
+
+例如：
+
+```
+1秒50次setData
+```
+
+
+建议：
+
+- 合并更新
+- 降低刷新频率
+
+
+---
+
+### 无效更新
+
+
+结合源码：
+
+发现：
+
+```
+更新整个list对象
+
+实际只使用name字段
+
+```
+
+
+---
+
+# 20.2 分包分析
+
+
+读取：
+
+```
+app.json
+
+page.json
+
+package.json
+
+```
+
+
+分析：
+
+- 主包大小
+- 分包大小
+- 页面依赖
+- 重复依赖
+
+
+输出：
+
+例如：
+
+```
+主包过大
+
+原因：
+
+components/editor
+
+占用800KB
+
+
+建议：
+
+迁移subpackage
+
+```
+
+
+注意：
+
+只生成建议。
+
+不自动修改。
+
+
+---
+
+# 20.3 分包预加载分析
+
+
+结合用户路径：
 
 ```
 首页
@@ -539,580 +1469,247 @@ my.performance
 
 订单
 
-↓
+```
 
-支付
+
+发现：
+
+```
+进入订单首次下载资源
 
 ```
 
 
-形成：
+建议：
 
-Session Timeline。
+增加：
 
-
----
-
-# 11. 小程序专项分析能力
-
-
-小程序不是H5。
-
-
-原因：
-
-- 无DOM
-- 无BOM
-- JS Runtime不同
-- 双进程渲染
-- JS-Native通信
-
-
-因此需要独立 MiniApp Analyzer。
+```
+preloadRule
+```
 
 
 ---
 
-# 12. 小程序生命周期分析
+# 20.4 组件分析
 
 
 分析：
 
-```
-App Launch
+- 初始化时间
+- ready时间
+- 重复创建
 
-↓
-
-Page Load
-
-↓
-
-Page Show
-
-↓
-
-Page Ready
-
-↓
-
-用户可交互
-
-```
-
-
-发现：
 
 例如：
 
 ```
-onShow:
+Recommend组件
 
-1500ms
+ready:
 
-原因：
-
-同步初始化:
-
-用户信息
-
-优惠查询
-
-推荐接口
+900ms
 
 ```
 
 
 建议：
 
-拆分首屏逻辑。
+- 延迟加载
+- 懒初始化
 
 
 ---
 
-# 13. setData / Bridge分析
+# 20.5 Canvas分析
 
 
-核心能力。
+重点关注：
 
-
-小程序：
-
-```
-JS
-
-|
-
-setData
-
-|
-
-Bridge
-
-|
-
-Native Render
-
-```
-
-
-## 采集：
-
-- setData次数
-- payload大小
-- 更新字段
-- 调用频率
-
-
-发现：
-
-## 数据过大
-
-例如：
-
-```
-setData:
-
-850KB
-
-```
-
-
-建议：
-
-- 减少字段
-- 分批更新
-
-
----
-
-## 高频调用
-
-
-发现：
-
-```
-1秒:
-
-50次setData
-
-```
-
-
-建议：
-
-合并更新。
-
-
----
-
-## 无效更新
-
-
-分析：
-
-setData：
-
-```
-user对象 200KB
-
-```
-
-
-页面：
-
-只使用：
-
-```
-user.name
-
-```
-
-
-建议：
-
-精确更新字段。
-
-
----
-
-# 14. Canvas分析
-
-
-重点：
-
-小程序Canvas容易出现性能问题。
+小程序Canvas容易产生性能问题。
 
 
 采集：
 
 - draw次数
-- draw耗时
-- FPS变化
-- 内存变化
+- FPS
+- 内存
+- 更新频率
 
 
 分析：
 
 例如：
 
-源码：
-
 ```
-for(){
-
-canvas.draw()
-
-}
-
+循环draw导致FPS下降
 ```
 
 
 建议：
 
 - 批量绘制
-- 降低刷新频率
 - 离屏Canvas
 
 
 ---
 
-# 15. 分包分析
+# 21. AI Analyzer
 
 
-静态分析：
+## 输入
+
+
+```
+Performance Session
+
++
+
+Source Code
+
++
+
+Project Structure
+
++
+
+Rule Engine Result
+
+```
+
+
+---
+
+## 输出结构
+
+
+```json
+
+{
+
+ issue:"首页加载慢",
+
+ severity:"high",
+
+ location:"pages/home/index.js",
+
+ reason:"onShow同步请求多个接口",
+
+ suggestion:"拆分首屏逻辑",
+
+ risk:"low"
+
+}
+
+```
+
+
+---
+
+# 22. Source Analyzer
+
 
 读取：
 
-- app.json
-- 页面配置
-- 组件依赖
+
+## 页面
+
+
+```
+pages/
+
+```
 
 
 分析：
 
-## 主包过大
-
-
-输出：
-
-```
-主包:
-
-1.8MB
-
-
-主要来源:
-
-order页面
-
-editor组件
-
-```
-
-
-建议：
-
-迁移分包。
-
-
-注意：
-
-只生成方案。
-
-不自动修改。
+- 生命周期
+- 数据流
 
 
 ---
 
-# 16. 分包预下载分析
-
-
-结合用户路径：
-
-例如：
-
-```
-首页
-
-↓
-
-商品详情
-
-↓
-
-订单
-
-```
-
-
-发现：
-
-订单分包首次进入加载。
-
-
-建议：
-
-增加 preloadRule。
-
-
----
-
-# 17. 小程序插件分析
+## Component
 
 
 分析：
 
-- plugin.json
-- 插件加载耗时
-
-
-采集：
-
-```
-plugin_start
-
-plugin_ready
-
-```
-
-
-发现：
-
-地图插件：
-
-800ms。
-
-
-建议：
-
-- 延迟加载
-- 空闲预加载
+- 初始化
+- 依赖
 
 
 ---
 
-# 18. 组件懒加载分析
+## 配置
 
 
-分析：
-
-首页组件：
+读取：
 
 ```
-Banner
+app.json
 
-Goods
+project.config.json
 
-Coupon
-
-Comment
-
-Recommend
-
-```
-
-
-发现：
-
-首屏不可见组件同步初始化。
-
-
-建议：
-
-- 异步组件
-- 可见区域加载
-- 延迟初始化
-
-
----
-
-# 19. AI分析能力
-
-
-## 指标分析
-
-输入：
-
-```
-LCP 3s
-```
-
-输出：
-
-```
-banner图片过大
-
-源码:
-
-HomeBanner.vue
-```
-
-
----
-
-## 源码关联
-
-关联：
-
-```
-性能事件
-
-↓
-
-源码位置
-
-↓
-
-优化建议
+package.json
 
 ```
 
 
 ---
 
-## 架构建议
+# 23. Performance Rule Engine
 
 
-例如：
+规则独立。
 
-```
-主包过大
 
-建议迁移order模块
-
-风险:
-
-高
-
-影响:
-
-路由
-分享
-权限
+目录：
 
 ```
+rules/
 
+├── lifecycle
 
----
+├── setData
 
-# 20. 不自动修改代码原则
+├── network
 
+├── package
 
-小程序：
+├── canvas
 
-禁止自动修改：
-
-- 分包
-- 路由
-- 插件
-- 页面结构
-
-
-原因：
-
-生产风险高。
-
-
-输出：
+└── component
 
 ```
-优化方案
 
-+
 
-影响范围
+规则：
 
-+
+```json
 
-风险等级
+{
 
-+
+id:"SETDATA_BIG",
 
-实施步骤
+condition:"size>200KB",
+
+level:"warning",
+
+suggestion:"reduce payload"
+
+}
 
 ```
 
 
 ---
 
-# 21. SDK生产隔离
-
-
-原则：
-
-性能分析工具不能影响生产性能。
-
-
-方案：
-
-
-## 环境变量
-
-
-开发：
-
-```
-PERF_ENABLE=true
-
-```
-
-
-生产：
-
-```
-false
-
-```
-
-
----
-
-## Tree Shaking
-
-
-生产删除。
-
-
----
-
-## Runtime Stub
-
-
-开发：
-
-```
-真实SDK
-
-```
-
-
-生产：
-
-```
-空实现
-
-```
-
-
----
-
-## 灰度
-
-支持：
-
-- 指定用户
-- 指定版本
-- 指定设备
-
-
----
-
-# 22. Skill设计
+# 24. Skill设计
 
 
 Skill负责：
 
-任务编排。
+流程编排。
 
 
 例如：
@@ -1120,18 +1717,27 @@ Skill负责：
 用户：
 
 ```
-分析支付宝小程序首页性能
+分析支付宝首页性能
 ```
 
 
-Skill：
+执行：
+
 
 ```
-选择alipay adapter
+启动Server
 
 ↓
 
-采集session
+创建Session
+
+↓
+
+等待SDK连接
+
+↓
+
+采集数据
 
 ↓
 
@@ -1143,53 +1749,195 @@ AI分析
 
 ↓
 
-生成报告
+Dashboard展示
 
 ```
 
 
 ---
 
-# 23. MCP接口
+# 25. MCP设计
 
 
-## analyze_performance
+MCP提供Agent能力。
 
 
-输入：
+## Session
 
-```json
-{
- platform:"alipay",
- target:"home"
-}
 
 ```
+create_session
 
+get_session
 
-返回：
+close_session
 
-```
-Performance Report
 ```
 
 
 ---
 
-## analyze_architecture
+## 数据
 
 
-分析：
+```
+query_events
 
-- 分包
-- 组件
-- 插件
-- 包结构
+get_timeline
+
+get_metrics
+
+```
 
 
 ---
 
-## generate_report
+## 分析
+
+
+```
+analyze_session
+
+find_performance_issue
+
+```
+
+
+---
+
+## 自动化
+
+
+```
+run_flow
+
+```
+
+
+例如：
+
+```
+open page
+
+click button
+
+wait
+
+collect
+
+```
+
+
+---
+
+# 26. Dashboard设计
+
+
+定位：
+
+AI增强版DevTools。
+
+
+---
+
+## Overview
+
+
+展示：
+
+- 启动时间
+- 页面耗时
+- 网络
+- setData
+- Canvas
+- FPS
+
+
+---
+
+## Timeline
+
+
+类似：
+
+Chrome Performance。
+
+
+展示：
+
+```
+Lifecycle
+
+Network
+
+Bridge
+
+Render
+
+```
+
+
+---
+
+## AI Panel
+
+
+实时：
+
+```
+发现问题：
+
+setData过大
+
+位置：
+
+pages/home/index.js
+
+建议：
+
+拆分数据
+
+```
+
+
+---
+
+# 27. Dashboard交互原则
+
+
+Dashboard负责：
+
+- 查看
+- 筛选
+- 标记
+- 分析
+- 导出
+
+
+不负责：
+
+复杂自动化。
+
+
+自动化由：
+
+- Agent
+- Playwright
+- 微信自动化
+
+
+负责。
+
+
+---
+
+# 28. 导出能力
+
+
+支持：
+
+
+## HTML Report
 
 
 生成：
@@ -1199,135 +1947,291 @@ performance-report.html
 ```
 
 
----
-
-# 24. HTML Report
-
-
 包含：
 
-## 性能总览
+- Summary
+- Timeline
+- Charts
+- AI分析
+- 优化建议
 
 
-## 时间线
-
-
-## 问题列表
-
-
-## 源码定位
-
-
-## 优化建议
-
-
-## 风险评估
+可独立打开。
 
 
 ---
 
-# 25. 开发路线
+## JSON
 
 
-## Phase 1
+用于：
 
-MVP
-
-支持：
-
-- core
-- H5 Adapter
-- 微信 Adapter
-- Skill
-- MCP
-- HTML Report
-
-
-验证：
-
-AI分析能力。
+二次分析。
 
 
 ---
 
-## Phase 2
+## CSV
 
-支付宝重点建设：
+
+用于：
+
+Excel分析。
+
+
+字段：
+
+```
+timestamp
+
+type
+
+page
+
+duration
+
+size
+
+metadata
+
+```
+
+
+---
+
+## Excel
+
+
+生成：
+
+```
+performance-report.xlsx
+```
+
+
+Sheet：
+
+
+Summary
+
+Timeline
+
+Network
+
+Bridge
+
+Issues
+
+
+---
+
+# 29. 数据存储
+
+
+MVP：
+
+SQLite。
+
+
+原因：
+
+- 本地运行
+- 简单
+- 支持查询
+
+
+未来：
+
+ClickHouse。
+
+
+适合：
+
+- 大量Event
+- 时间序列
+- 长期趋势
+
+
+---
+
+# 30. 安全设计
+
+
+默认：
+
+本地分析。
+
+
+不上传：
+
+- 源码
+- Token
+- Cookie
+
+
+网络数据脱敏：
+
+过滤：
+
+```
+Authorization
+
+Cookie
+
+Token
+
+Password
+
+```
+
+
+---
+
+# 31. 开发路线
+
+
+## Phase 0 基础设施
+
+
+完成：
+
+- Monorepo
+- Core
+- Event Schema
+- Server
+
+
+---
+
+## Phase 1 Dashboard MVP
+
+
+完成：
+
+- WebSocket
+- Timeline
+- Session
+- Export
+
+
+---
+
+## Phase 2 H5
+
+
+完成：
+
+- Playwright
+- CDP
+- WebVitals
+
+
+---
+
+## Phase 3 微信
+
+
+完成：
+
+- 自动化
+- 生命周期
+- Performance API
+
+
+---
+
+## Phase 4 支付宝
+
+
+重点：
 
 - Runtime SDK
-- Session采集
-- MiniApp Analyzer
+- Hook
+- setData分析
+- request分析
+- 真机采集
 
 
 ---
 
-## Phase 3
+## Phase 5 AI能力
 
-企业能力：
 
-- Web Console
-- 性能趋势
-- 版本对比
-- 灰度分析
+完成：
+
+- Rule Engine
+- Source Analyzer
+- MCP
+- Skill
 
 
 ---
 
-## Phase 4
+# 32. 长期方向
 
-AI优化闭环：
 
-```
-发现问题
+未来支持：
 
-↓
+- Flutter
+- React Native
+- Native App
 
-定位源码
 
-↓
+通过：
 
-生成Patch建议
-
-↓
-
-人工确认
-
-↓
-
-验证效果
-
-```
+统一 Event Model。
 
 
 ---
 
 # 总结
 
-项目不是传统性能监控工具。
 
-定位：
+PerfLens：
 
-> AI 驱动的前端性能工程平台。
+> AI增强版 DevTools + MiniApp Runtime Performance Platform
 
-核心竞争力：
 
-1. AI理解源码和业务
-2. 多平台Adapter架构
-3. 小程序Runtime深度分析
-4. 支付宝小程序性能分析能力
+核心能力：
 
-其中：
+1. Runtime采集
 
-- H5：Playwright + CDP
-- 微信：自动化SDK + 性能API
-- 支付宝：Runtime SDK + AI分析
+2. AI源码分析
 
-最终目标：
+3. 小程序专项性能模型
 
-让 AI 成为一个懂 Web、小程序 Runtime 和前端架构的性能工程师。
+4. MCP Agent能力
+
+5. 实时Dashboard
+
+6. HTML/CSV/Excel报告
+
+
+核心壁垒：
+
+支付宝小程序 Runtime 性能分析。
 ```
 
-这版已经可以作为后续 Claude Code / Cursor / Teamlink 开发的 `plan.md` 基础。你后续如果继续细化，我建议下一步拆两个文档：
+这版作为 `plan.md` 已经可以作为项目总纲。
 
-1. `architecture.md`：详细定义 monorepo、接口、Event Model  
-2. `miniapp-performance-rules.md`：沉淀微信/支付宝小程序性能规则库（这个会是核心壁垒）
+后续让 Claude Code 拆分时，我建议拆成：
+
+```
+docs/
+
+├── architecture.md
+├── event-schema.md
+├── runtime-sdk.md
+├── miniapp-performance-rules.md
+├── mcp-design.md
+├── dashboard-design.md
+└── roadmap.md
+```
+
+其中最值得优先细化的是：
+
+1. `event-schema.md`（决定整个系统能不能扩展）
+2. `runtime-sdk.md`（支付宝壁垒）
+3. `miniapp-performance-rules.md`（AI价值核心）
+
+这三个确定后，代码实现会顺很多。
